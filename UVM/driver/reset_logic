@@ -1,0 +1,45 @@
+task apb_master_driver::get_and_drive();
+while(1) begin
+  reset(); // 설계를 초기상태로 만듦
+fork
+ // 스레드 A : 리셋 발생시
+@(negedge vif.psesetn)
+    `uvm_info(get_type_name(), "get_and_drive:: Reset Asserted", UVM_MEDIUM)
+// 스레드 B : 정상 상태시
+begin
+//이 스레드는 리셋시 킬됨
+forever begin // 무한 루프
+@(posedge vif.pclk iff (vif.presetn)) // 리셋신호가 안 들어온동안 상승 에지에 반응
+seq_item_port.get_next_item(req);
+        drive_transfer(req);
+seq_item_port.item_done(req);
+end
+end
+join_any // 리셋 발생 시 탈출
+disable fork; // 무한 루프 종료
+
+//전송 중에 있을 경우 전송의 종료 필요, 또한
+//리셋 후 정리 작업은 여기서. 이 지점을 도달하는 유일한 방법은 리셋을 통한 방법 뿐임
+if(req != null) begin // req는 get_next_item, item_done 사이가 아니라면 null 을 가지고 있음
+this.end_tr(req); //트랜잭션 기록 정상 종료
+seq_item_port.item_done(req); // 트랜잭션의 종료를 알림
+end
+end
+endtask : get_and_drive
+
+begin_tr, end_tr
+uvm_component, uvm_transaction에 정의된 빌트인 함수
+1. begin_tr(trans_handle) : "이제부터 이 트랜잭션 기록을 시작한다"는 신호, 트랜잭션 시작 시점에 호출
+2. end_tr(trans_handle): "이 트랜잭션의 기록을 여기서 마친다"는 신호, 트랜잭션이 완료되는 시점에 호출
+
+사용 이유
+end_tr(trans_handle): "이 트랜잭션의 기록을 여기서 마친다"는 신호입니다. 트랜잭션이 완료되는 시점에 호출합니다.
+
+사용 예시
+// 드라이버에서 트랜잭션 기록을 할 때
+void'(req.begin_tr()); // 기록 시작 (handle을 리턴함)
+drive_transfer(req);   // 실제 하드웨어 신호 구동
+req.end_tr();          // 기록 종료// 드라이버에서 트랜잭션 기록을 할 때
+void'(req.begin_tr()); // 기록 시작 (handle을 리턴함)
+drive_transfer(req);   // 실제 하드웨어 신호 구동
+req.end_tr();          // 기록 종료
