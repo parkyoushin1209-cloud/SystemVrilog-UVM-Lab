@@ -31,3 +31,17 @@ item 조작
 
 변수 선언은 앞에 나와야 함
 할당이 먼저
+
+always_ff에서는 논블로킹만 사용 가능함
+always_ff에서 지연은 사용 불가능함
+콜렉터의 wait에서 enable && ready만 기다림 -> 결과적으로 이전 result를 보게 되었음 추가적인 지연이 필요
+
+collector에서 data를 확인했을 때 result는 남아 있으나 data가 리셋되어 있는 상태였음 -> reset 잔 1사이클 대기 시킴
+
+DUT의 출력은 드라이브의 reset에서 바꾸면 안 됨 + 리셋 신호는 시퀀스로 조작하기
+drive_idle() 이라는 이름 사용 권장
+enable, ready 등의 신호는 drive_idle 외부에서 켜지고 1클럭 뒤에 초기화해주기
+ready는 결과 생성 쪽에서(DUT)애서 트리거 해주기
+TB는 ready 트리거 x
+조합회로면 ready 거의 안 씀
+
