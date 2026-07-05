@@ -1,0 +1,27 @@
+
+프로퍼티 연산자
+and, or, implies, iff, until, nexttime, followed-by, if-else, always, eventually, case, (sync_)accept.reject_on
+
+-s_always[bounded_range] 
+범위 -> 시작 범위만 그 안에 들어가 있으면 됨
+
+-week, eventually
+unbounded range 사용 불가
+eventually는 내부적으로 or처리된 것과 비슷한 동작
+공허하지 않은 성공이 가장 먼저 나와야 공허하지 않은 성공 -> 주의하기(공허한 성공 후 탐색이 끝나버릴 수 있음)
+
+-disable iff는 통계에 기여 x,
+(sync_)accept.reject_on는 기여 o, preponed 샘플링 리전에서 샘플됨, abort 연산자 중첩도 허용(left->right 순 평가), LV 참조, end point 포함 불가능, 샘플된 값 함수 포함 가능
+
+디자인 변수는 preponed 샘플 값, 지역 변수는 현재 값 이용 -> 시퀀스 매치 아이템 리스트의 변화가 즉각적으로 반영됨
+
+지역 변수 전달을 위해서는 untyped거나 local typed여야 함
+
+LV를 카운트 변수로도 사용 가능함
+property pAckDone(ack, xfr, rep);
+int v_xfr_count;
+(ack, v_xfr_count = 1) |=>
+sync_reject_on(!xfr)
+v_xfr_count == rep or
+((xfr && (v_xfr_count < rep)), v_xfr_count)[*1:$] ##1 v_xfr_count == rep);
+endproperty
