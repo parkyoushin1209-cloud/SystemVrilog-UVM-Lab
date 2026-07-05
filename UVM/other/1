@@ -1,0 +1,56 @@
+Tx, Rx가 모두 있는 이유 -> 입력부, 출력부 모니터를 따로 두고 예상값과 실제값을 만들어 내 비교할 수 있도록
+Tx, Rx에 대해 각각 하나의 에이전트를 둠
+스코어보드에는 2개의 imp가 생기며 보통 이름은 
+add : 예상값을 구하고 큐에 저장
+match : DUT값과 큐에서 꺼낸 값을 비교
+각각에 대해 write가 필요하므로
+`uvm_analysis_imp_decl 매크로 사용(스코어보드 클래스 외부에)
+입력부 모니터에서도 샘플링 값을 정확히 받기 위해 버스 프로토콜이 중요한 것임
+
+클래스 변수에는 논블록킹 할당이 적절함
+DUT 신호는 <= 유지(드라이버 등 인터페이스 신호 구동 시)
+
+=를 사용해야 하는 것 트랜잭션의 클래스 멤버
+
+<= 를 사용해야 하는 것 RTL(인터페이스, DUT 신호)
+vif.addr<= ... vif.ready <= ... , vif.enable <= ....
+
+모듈 안에서 forever 만 x -> initial, always에 블록 두기
+
+extern 된 곳에 protected는 사용 안 함
+item_done에는 일반적으로 인자를 주지 않음
+
+run_phase는 계속 실행
+get_and_drive -> 계속 get_nex_item
+drive_transfer -> 딱 하나의 트랜잭션만 처리하고 반환
+
+uvm_do
+ start_item(~~);
+item 조작 
+   finish_item(~~);
+
+변수 선언은 앞에 나와야 함
+할당이 먼저
+
+always_ff에서는 논블로킹만 사용 가능함
+always_ff에서 지연은 사용 불가능함
+콜렉터의 wait에서 enable && ready만 기다림 -> 결과적으로 이전 result를 보게 되었음 추가적인 지연이 필요
+
+collector에서 data를 확인했을 때 result는 남아 있으나 data가 리셋되어 있는 상태였음 -> reset 잔 1사이클 대기 시킴
+
+DUT의 출력은 드라이브의 reset에서 바꾸면 안 됨 + 리셋 신호는 시퀀스로 조작하기
+drive_idle() 이라는 이름 사용 권장
+enable, ready 등의 신호는 drive_idle 외부에서 켜지고 1클럭 뒤에 초기화해주기
+ready는 결과 생성 쪽에서(DUT)애서 트리거 해주기
+TB는 ready 트리거 x
+조합회로면 ready 거의 안 씀
+
+top이름 tb_로 시작하기
+parameter string runner_cfg = ""; 이거 top에 두기
+top에 `include "interface.sv" 두지 말기
+`include "design.sv"는 두어야 함
+*** drv, dut에서만 논블로킹 할당 사용하기**
+drv 리셋 처리 로직에서 req 생성 없이 get_next_item으로 받기
+-> item_done을 get_next_item보다 더 많이 호출해버림
+get_and_drive에 reset fork..join_any 블록 두기
+forever 2개 필요함
