@@ -1,0 +1,242 @@
+// 트랜잭션 어댑터======================================================================
+extends uvm_reg_adapter
+`uvm_object_utils
+virtual function uvm_sequence_item reg2bus(const ref uvm_reg_bus_op rw) 구현
+virtual function void bus2reg(uvm_sequence_item bus_item, ref uvm_reg_bus_op rw) 구현
+
+생성자 
+바이트 인에이블 지원 -> supports_byte_enables = 1
+버스 드라이버가 반응 제공(ex. 분리된 반응 디스크립터에서 읽기 동작의 결과) -> provides_responses = 1
+
+class apb_adapter extends uvm_reg_adapter;
+`uvm_object_utils(apb_adapter)
+
+function new(string name = "apb_adapter");
+super.new(name);
+supports_byte_enable = 1;
+provides_responses = 1;
+endfunction
+
+virtual function uvm_sequence_item reg2bus(const ref uvm_reg_bus_op rw);
+apb_rw apb = apb_rw::type_id::create("apb_rw");
+apb.kind = (rw.kind == UVM_READ) ? apb_rw::READ : apb_rw::WRITE;
+apb.addr = rw.addr;
+apb.data = rw.data;
+return apb;
+endfunction : reg2bus
+
+virtual function void bus2reg(uvm_sequence_item bus_item, ref uvm_reg_bus_op rw);
+apb_rw apb;
+if(!$cast(apb, bus_item)) begin
+    `uvm_fatal("TYPE_MISMATCHING", " Provided bus item is not of the correct type")
+    return;
+end
+rw.kind = (apb.kind == apb_rw::READ) ? UVM_READ : UVM_WRITE;
+rw.addr = apb.addr;
+rw.data = apb.data;
+rw.status = UVM_IS_OK;
+endfunction
+endclass
+
+
+//프레딕터============================================================
+class block_env extends uvm_env;
+`uvm_object_utils(block_env)
+
+block_reg_model regmodel;
+uvm_reg_predictor #(apb_rw) apb2reg_predictor;
+apb_agent apb;
+apb_adapter reg2apb;
+
+virtual function void build_phase(uvm_phase phase);
+...
+apb2reg_predictor = new("apb2reg_predictor", this);
+endfunction
+
+virtual function void connect_phase(uvm_phase phase);
+if(regmodel.get_pareng() == null) begin
+    reg2apb = apb_adapter::type_id::create("reg2apb");
+    ...
+    apb2reg_predictor.map = regmodel.APB;
+    apb2reg_predictor.adapter = reg2apb;
+    regmodel.APB.set_auto_predict(0);
+    apb.monitor.ap.connect(apb2reg_predictor.bus_in);
+end
+...
+endfunction
+...
+endclass
+
+class my_env extends uvm_env;
+`uvm_component_utils(my_env)
+
+
+
+//환경으로 통합==============================================================
+1. 암묵적 예측
+HDL 경로가 사용될 경우 
+루트 HDL 경로는 레지스터 모델을 인스턴스화 하는 환경 내에 반드시 명시
+루트 경로의 값은 완전한 시뮬레이션 모델 내에서 DUT를 위한 모델의 장소에 의존할 것임
+
+connect_phase
+루트 블록과 버스 에이전트 연결 - if문으로 체크
+어댑터 인스턴스화 
+
+class block_env extends uvm_env;
+`uvm_component_utils(block_env)
+
+block_reg_model regmodel;
+subblk_env subblk;
+apb_adapter reg2apb;
+apb_agent apb;
+
+virtual function void build_phase(uvm_phase phase);
+super.build_phase(phase);
+if(regmodel == null) begin
+regmodel = block_reg_model::type_id::create("regmodel");
+regmodel.build();
+regmodel.set_hdl_path_root("tb_top.dut");
+regmodel.lock_model();
+end
+subblk = subblk_env::type_id::create("subblk", this);
+subblk.regmodel = regmodel.subblk;
+endfunction
+
+virtual function void connect_phase(uvm_phase phase);
+if(regmodel.get_parent() == null) begin
+    reg2apb = apb_adapter::type_id::create("reg2apb");
+    regmodel.APB.set_sequencer(apb.sequencer, reg2apb); // APB는 주소 맵
+    regmodel.set_auto_predict(1);
+    // 레지스터 모델 - 버스 에이전트 통합
+end
+endfunction 
+endclass
+
+//레지스터 시퀀스============================================
+extends uvm_reg_sequence #(T_name) 형식으로 베이스 클래스 파라미터화도 가능함
+
+
+class my_reg_sequence extends uvm_reg_sequence #(uvm_sequence #(apb_rw)); // 시퀀스이므로 파라미터 타입으로 시퀀스 필요
+`uvm_object_utils(my_reg_sequence)
+
+block_reg_model model;
+
+virtual task body();
+  uvm_status_e status;
+  uvm_reg_data_t data;
+
+  model.A.write(status, 'h33, .parent(this));
+  if(status == UVM_NOT_OK)
+    `uvm_error(...)
+  
+  model.A.read(status, data, .parent(this));
+  if(data != 'h33)
+    `uvm_error(...)
+endtask : body
+
+endclass : my_reg_sequence
+
+//실행 방법
+class my_test extends uvm_test;
+block_env env;
+virtual task run_phase(uvm_phase phase);
+my_reg_sequence seq = my_req_sequence::type_id::create("seq");
+seq.start(env.apb.sequencer);
+endtask
+endclass
+
+
+2. 가상 시퀀스 사용
+버스 시퀀서 - 어댑터 쌍 n개를 레지스터 모델에 등록
+시퀀서 직접 참조 없음
+
+class block_env extends uvm_env;
+`uvm_component_utils(block_env)
+
+block_reg_model regmodel;
+apb_agent apb;
+wishbone_agent wsh;
+apb_adapter reg2apb;
+wsh_adapter reg2wsh;
+
+virtual function void connect_phase(uvm_phase phase);
+if(regmodel.get_parent() == null) begin
+    reg2apb = apb_adapter::type_id::create("reg2apb");
+    reg2wsh = wsh_adapter::type_id::create("reg2wsh");
+    regmodel.APB.set_sequencer(apb.sequencer, reg2apb);
+    regmodel.WSH.set_sequencer(wsh.sequencer, reg2wsh);
+    regmodel.set_auto_predict(1);
+
+end
+endfunction
+endclass
+
+
+//시퀀스
+class my_reg_sequence extends uvm_reg_sequence;
+`uvm_object_utils(my_reg_sequence)
+
+block_reg_model model;
+
+virtual task body();
+uvm_status_e status;
+
+fork
+    model.APB.write(status, 'h33, .parent(this));
+    model.WSH.read(status, 'h66, .parent(this));
+join
+endtask
+
+endclass
+
+//실행
+class my_test extends uvm_test;
+block_env env;
+virtual task run_phase(uvm_phase phase);
+my_reg_sequence seq = my_req_sequence::type_id::create("seq");
+seq.start(null);  //시퀀서 명시 없음
+
+만약 코너 케이스 테스트를 원한다면 아래처럼도 가능
+seq.grap(env.APB.get_sequencer());
+...
+seq.ungrap(env.APB.get_sequencer()); 
+endtask
+endclass
+
+3. 레이어드 시퀀서
+typedef uvm_reg_sequence #(uvm_sequence #(apb_rw)) reg2apb_seq_t;
+// uvm_reg_sequence 클래스는 자체적으로 어댑터, 시퀀서 핸들을 가짐
+
+class block_env extends uvm_env;
+
+block_reg_model regmodel;
+uvm_sequencer #(uvm_reg_item) reg_seqr;
+apb_agent apb;
+reg2apb_seq_t reg2apb_seq;
+
+virtual function void connect_phase(uvm_phase phase);
+if(regmodel.get_parent() == null) begin
+    regmodel.default_map.set_sequencer(reg_seqr, null);
+    reg2apb_seq = reg2apb_seq_t::type_id::create("reg2apb_seq", get_full_name());
+    reg2apb_seq.reg_seqr = reg_seqr;
+    reg2apb_seq.adapter = apb_adapter::type_id::create("reg2apb");
+    regmodel.set_auto_predict(1);
+end
+endfunction
+
+virtual task run();
+reg2apb_seq.start(apb.sequencer);
+endtask
+
+endclass
+
+//실행
+class my_test extends uvm_test;
+block_env env;
+virtual task run_phase(uvm_phase phase);
+my_reg_sequence seq = my_req_sequence::type_id::create("seq");
+seq.start(env.reg_seqr); 
+endtask
+endclass
+
+
